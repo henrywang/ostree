@@ -1,0 +1,45 @@
+name: ci-tmt
+
+permissions:
+  actions: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-tmt:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        stream: [stream9, stream10]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: ./.github/actions/bootc-ubuntu-setup
+        with:
+          libvirt: 'true'
+      - name: Install tmt
+        run: |
+          set -xeuo pipefail
+          sudo apt install -y python3-pip
+          pip3 install tmt[all]
+      - name: Build RPMs and container image
+        run: sudo STREAM=${{ matrix.stream }} just build-rpm
+      - name: Run TMT integration tests
+        run: sudo STREAM=${{ matrix.stream }} just test-tmt-nobuild
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmt-logs-${{ matrix.stream }}
+          path: /var/tmp/tmt

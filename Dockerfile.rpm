@@ -1,0 +1,68 @@
+
+ARG base=quay.io/centos-bootc/centos-bootc:stream9
+
+FROM $base as buildroot
+COPY ci /ci
+RUN /ci/installdeps.sh
+RUN dnf install -y rpm-build xz
+
+# This image holds the source code
+FROM $base as src
+COPY . /src
+
+# Build RPMs from source
+FROM buildroot as rpmbuild
+ARG pkgversion
+COPY --from=src /src /build
+WORKDIR /build
+RUN --mount=type=cache,target=/ccache <<EORUN
+set -xeuo pipefail
+mkdir -p /var/roothome
+
+# Initialize submodules if needed
+if ! test -f libglnx/README.md || ! test -f bsdiff/README.md; then
+    git config --global --add safe.directory '*'
+    git submodule update --init
+fi
+
+# Create source tarball
+ci/make-git-snapshot.sh
+
+# Download and prepare spec file
+curl -LO https://src.fedoraproject.org/rpms/ostree/raw/rawhide/f/ostree.spec
+if [ -n "${pkgversion}" ]; then
+    version="${pkgversion}"
+else
+    version=$(git describe --always --tags --match 'v2???.*' | sed -e 's,-,\.,g' -e 's,^v,,')
+fi
+sed -i "s,^Version:.*,Version: ${version}," ostree.spec
+sed -i 's/^Patch/# Patch/g' ostree.spec
+sed -i 's,%autorelease,1%{?dist},g' ostree.spec
+
+# Build RPMs
+export CC="ccache gcc" CCACHE_DIR=/ccache
+rpmbuild -bb \
+    --define "_sourcedir $PWD" \
+    --define "_specdir $PWD" \
+    --define "_builddir $PWD/.rpmbuild" \
+    --define "_rpmdir /out" \
+    --define "_buildrootdir $PWD/.rpmbuildroot" \
+    --without tests \
+    --define "debug_package %{nil}" \
+    ostree.spec
+
+# Flatten RPMs from arch subdirectory
+mv /out/*/*.rpm /out/ 2>/dev/null || true
+EORUN
+
+# Override userspace with our built RPMs
+FROM $base as rootfs
+RUN --mount=type=bind,from=packages,src=/,target=/run/packages \
+    rpm -Uvh --oldpackage --nodeps /run/packages/ostree-*.rpm /run/packages/libostree-*.rpm
+
+# The default final container, with also a regenerated
+# initramfs in case ostree-prepare-root changed.
+FROM rootfs
+# https://docs.fedoraproject.org/en-US/bootc/initramfs/#_regenerating_the_initrd
+# since we have ostree-prepare-root there
+RUN set -x; kver=$(cd /usr/lib/modules && echo *); dracut -vf /usr/lib/modules/$kver/initramfs.img $kver

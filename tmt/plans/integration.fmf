@@ -1,0 +1,25 @@
+# Common settings for all plans
+provision:
+  how: virtual
+  image: centos-stream-9
+  memory: 4096
+  disk: 20
+prepare:
+  # Install ostree RPM from COPR when running via Packit
+  - how: install
+    order: 97
+    package:
+      - podman
+      - skopeo
+      - ostree
+      - bootc
+    when: running_env == packit
+execute:
+  how: tmt
+
+/plan-bootc-install:
+  summary: Build ostree container image and verify bootc install
+  discover:
+    how: fmf
+    test:
+      - /tmt/tests/tests/test-bootc-install

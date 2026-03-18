@@ -1,0 +1,7 @@
+/test-bootc-install:
+  summary: Test bootc install to-filesystem with custom ostree image
+  duration: 30m
+  require:
+    - podman
+    - bootc
+  test: bash booted/test-bootc-install.sh

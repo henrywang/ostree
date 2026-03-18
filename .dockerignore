@@ -1,5 +1,6 @@
 # Don't need these in the container
 Dockerfile
+Dockerfile.rpm
 Justfile
 .github
 # We put most binaries under here
